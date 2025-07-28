@@ -1,13 +1,29 @@
 (ns ^:figwheel-hooks chip8-script.core
   (:require
-   [goog.dom :as gdom]))
+   [goog.dom :as gdom]
+   [chip8-script.memory :as mem]))
 
-(println "This text is printed from src/chip8_script/core.cljs. Go ahead and edit it and see reloading in action.")
+(println "This text is printed ffrom src/chip8_script/core.cljs. Go ahead and edit t and see reloading in action.")
 
-(defn multiply [a b] (* a b))
+(def emulator-state
+  (atom {:memory nil
+         :registers (vec (repeat 16 0))
+         :pc 0x200
+         :i 0
+         :stack '() ; IMPORTANT: Stack pointer does not overflow
+         :display (vec (repeat (* 64 32) false))
+         :timers {:delay 0 :sound 0}
+         :keys #{}}))
 
-;; define your app data so that it doesn't get over-written on reload
-(defonce app-state (atom {:text "Hello world!"}))
+;; Load memory and fonts
+(println "Loading memory and fonts...")
+(-> (mem/clean-memory)
+    (mem/load-fonts "roms/font.csv")
+    (.then #(do (js/console.log "Fonts loaded") %))  ; Debug print
+    (.then #(mem/load-rom % "roms/ibm.ch8"))
+    (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
+    (.then #(swap! emulator-state assoc :memory %))
+    (.then #(js/console.log "Done!")))
 
 (defn getCanvas []
   (gdom/getElement "my-canvas"))
@@ -28,6 +44,17 @@
     (.putImageData ctx (createImage ctx pixels) 0 0)))
 
 
+
+(comment 
+  (defn game-loop
+  [state]
+  (swap! state cpu/fetch-decode-execute)
+  (Thread/sleep 100)
+  (let [disp (:display @emulator-state)]
+    (paintCanvas disp))
+  (game-loop state))
+
+(game-loop emulator-state))
 
 ;; specify reload hook with ^:after-load metadata
 (defn ^:after-load on-reload []
