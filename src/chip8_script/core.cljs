@@ -4,7 +4,7 @@
    [chip8-script.memory :as mem]
    [chip8-script.cpu :as cpu]))
 
-(println "This text is printed ffrom src/chip8_script/core.cljs. Go ahead and edit t and see reloading in action.")
+(println "This text is printed from src/chip8_script/core.cljs. Go ahead and edit t and see reloading in action.")
 
 (def emulator-state
   (atom {:memory nil
@@ -17,14 +17,7 @@
          :keys #{}}))
 
 ;; Load memory and fonts
-(println "Loading memory and fonts...")
-(-> (mem/clean-memory)
-    (mem/load-fonts "roms/font.csv")
-    (.then #(do (js/console.log "Fonts loaded") %))  ; Debug print
-    (.then #(mem/load-rom % "roms/ibm.ch8"))
-    (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
-    (.then #(swap! emulator-state assoc :memory %))
-    (.then #(js/console.log "Done!")))
+
 
 (defn getCanvas []
   (gdom/getElement "my-canvas"))
@@ -55,8 +48,16 @@
     (let [disp (:display @state)]
       (paintCanvas disp))
     (js/requestAnimationFrame #(game-loop state))))
+(println "Loading memory and fonts...")
+(-> (mem/clean-memory)
+    (mem/load-fonts "roms/font.csv")
+    (.then #(do (js/console.log "Fonts loaded") %))  ; Debug print
+    (.then #(mem/load-rom % "roms/ibm.ch8"))
+    (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
+    (.then #(swap! emulator-state assoc :memory %))
+    (.then #(js/console.log "Done!"))
+    (.then #(game-loop emulator-state))) ; Error handling
 
-(game-loop emulator-state)
 
 ;; specify reload hook with ^:after-load metadata
 (defn ^:after-load on-reload []
