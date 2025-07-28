@@ -1,0 +1,137 @@
+(ns chip8-script.cpu
+  (:require
+   [chip8-script.memory :as mem]
+   [clojure.string :as s]))
+
+(defn read-nibble
+  "Reads n:th nibble (n in 1 2 3 4)"
+  [opcode n]
+  (let [shift (* 4 (- 4 n))]
+    (-> opcode
+        (bit-and (bit-shift-left 0xF shift))
+        (bit-shift-right shift))))
+
+(defn decode
+  "Takes opcode and determines which command to run"
+  [opcode]
+  ; Check the first nibble:
+  (case (read-nibble opcode 1)
+    0 (case opcode
+        0x00E0 :CLS
+        0x00EE :RET
+        nil)
+    1 :JP-addr
+    2 :CALL-addr
+    3 :SE-Vx-byte
+    4 :SNE-Vx-byte
+    5 :SE-Vx-Vy
+    6 :LD-Vx-byte
+    7 :ADD-Vx-byte
+    8 (case (read-nibble opcode 4)
+        0 :LD-Vx-Vy
+        1 :OR-Vx-Vy
+        2 :AND-Vx-Vy
+        3 :XOR-Vx-Vy
+        4 :ADD-Vx-Vy
+        5 :SUB-Vx-Vy
+        6 :SHR-Vx-Vy
+        7 :SUBN-Vx-Vy
+        0xE :SHL-Vx-Vy)
+    9 (when (= 0 (read-nibble opcode 4)) :SNE-Vx-Vy)
+    0xA :LD-I-addr
+    0xB :JP-V0-addr
+    0xC :RND-Vx-byte
+    0xD :DRW-Vx-Vy-nibble
+    ; E F TODO
+    0xE nil
+    0xF nil))
+
+(defn byte->pixels
+  [byte]
+  (let [byte-string (.toString byte 2)]
+    (map #(= "1" (str %))
+         (str
+          (apply str (take (- 8 (count byte-string)) (repeat "0"))) ; This is just padding
+          byte-string))))
+
+(defn bytes->sprite
+  ([bytes x y]
+   (bytes->sprite bytes x y (vec (take (* 32 64) (repeat false)))))
+  ([bytes x y sprite]
+   (if-let [[first & rest] bytes]
+     (recur rest x (inc y)
+            (mem/write-from sprite (+ x (* 64 y)) (byte->pixels first)))
+     sprite)))
+
+(defn xor
+  [a b]
+  (not= (boolean a) (boolean b)))
+
+
+(def commands
+  {:CLS (fn [state opcode] ; Clear display
+          (assoc state :display (vec (repeat (* 64 32) false))))
+   :RET (fn [state opcode] ; Return from subroutine
+          (let [[first & rest] (:stack state)]
+            (-> state
+                (assoc :pc first)
+                (assoc :stack rest))))
+
+   :JP-addr (fn [state opcode] ; Jump to address
+              ;(println state)
+              ;(println (:pc state))
+              ;(println (+ 1 (bit-and 0x0FFF opcode)))
+              (assoc state :pc (bit-and 0x0FFF opcode)))
+
+   :CALL-addr (fn [state opcode] ; Call subroutine at NNN
+                (-> state
+                    (assoc :stack (conj (:stack state) (:pc state)))
+                    (assoc :pc (bit-and 0x0FFF opcode))))
+
+   :SE-Vx-byte (fn [state opcode] ; Skip if equal
+                 (if (= (get-in state [:registers (read-nibble opcode 2)]) (bit-and 0x00FF opcode))
+                   (update state :pc #(+ 2 %))
+                   state))
+
+   :SNE-Vx-byte (fn [state opcode] ; Skip if not equal
+                  (if-not (= (get-in state [:registers (read-nibble opcode 2)]) (bit-and 0x00FF opcode))
+                    (update state :pc #(+ 2 %))
+                    state))
+
+   :SE-Vx-Vy (fn [state opcode] ; Skip if Vx = Vy
+               (if (= (get-in state [:registers (read-nibble opcode 2)]) (get-in state [:registers (read-nibble opcode 3)]))
+                 (update state :pc #(+ 2 %))
+                 state))
+
+   :LD-Vx-byte (fn [state opcode] ; Load byte to register
+                 (assoc-in state [:registers (read-nibble opcode 2)] (bit-and 0x00FF opcode)))
+   :ADD-Vx-byte (fn [state opcode] ; Add byte to register
+                  (assoc-in state [:registers (read-nibble opcode 2)]
+                            (-> opcode
+                                (bit-and 0x00FF)
+                                (+ (get-in state [:registers (read-nibble opcode 2)]))
+                                (bit-and 0x00FF))))
+   :LD-I-addr (fn [state opcode] ; Set I to address
+                (assoc state :i (bit-and 0x0FFF opcode)))
+   :DRW-Vx-Vy-nibble (fn [state opcode] ; 
+                       (let [[vx vy] (map #(get-in state [:registers (read-nibble opcode %)]) '(2 3))
+                             bytes (mem/read-n-bytes (:memory state) (:i state) (read-nibble opcode 4))]
+                         (let [old-display (:display state) sprite (bytes->sprite bytes vx vy)]
+                           (-> state
+                               (assoc :display (vec (map xor old-display sprite)))
+                               (assoc-in [:registers 0xF] (if (some true? (map #(= %1 %2) old-display sprite)) 1 0))))))})
+
+
+(defn fetch-decode-execute
+  [state]
+  ;(println "DEBUG: state parameter is:" state)
+  ;(println "DEBUG: type of state:" (type state))
+  ;(println "DEBUG: (:pc state) is:" (:pc state))
+  (let [opcode (mem/read-instruction (:memory state) (:pc state))]
+    ;(println "The opcode is " opcode)
+    (let [updated-state (assoc state :pc (+ 2 (:pc state)))]
+      (if-let [com (decode opcode)]
+        (if-let [fun (get commands com)]
+          (fun updated-state opcode)
+          updated-state)
+        updated-state))))

@@ -1,7 +1,8 @@
 (ns ^:figwheel-hooks chip8-script.core
   (:require
    [goog.dom :as gdom]
-   [chip8-script.memory :as mem]))
+   [chip8-script.memory :as mem]
+   [chip8-script.cpu :as cpu]))
 
 (println "This text is printed ffrom src/chip8_script/core.cljs. Go ahead and edit t and see reloading in action.")
 
@@ -45,16 +46,17 @@
 
 
 
-(comment 
-  (defn game-loop
-  [state]
-  (swap! state cpu/fetch-decode-execute)
-  (Thread/sleep 100)
-  (let [disp (:display @emulator-state)]
-    (paintCanvas disp))
-  (game-loop state))
 
-(game-loop emulator-state))
+(defonce game-running (atom true))
+
+(defn game-loop [state]
+  (when @game-running
+    (swap! state cpu/fetch-decode-execute)
+    (let [disp (:display @state)]
+      (paintCanvas disp))
+    (js/requestAnimationFrame #(game-loop state))))
+
+(game-loop emulator-state)
 
 ;; specify reload hook with ^:after-load metadata
 (defn ^:after-load on-reload []
