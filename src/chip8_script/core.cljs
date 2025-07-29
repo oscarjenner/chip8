@@ -17,16 +17,20 @@
          :timers {:delay 0 :sound 0}
          :keys #{}}))
 
-(def pressedKeys (atom #{}))
+(def key-values
+  {"1" 0x1 "2" 0x2 "3" 0x3 "4" 0xC
+   "q" 0x4 "w" 0x5 "e" 0x6 "r" 0xD
+   "a" 0x7 "s" 0x8 "d" 0x9 "f" 0xE
+   "z" 0xA "x" 0x0 "c" 0xB "v" 0xF})
 
 (defn handeKeypress [event]
-  (let [key (.-key event)]
+  (when-let [key (key-values (.-key event))]
     (swap! emulator-state #(assoc %1 :keys (conj (:keys %1) %2)) key)
     (println "Pressed keys:" (@emulator-state :keys))
     ))
 
 (defn handleKeyRelease [event]
-  (let [key (.-key event)]
+  (when-let [key (key-values (.-key event))]
     (swap! emulator-state #(assoc %1 :keys (disj (:keys %1) %2)) key)))
 
 (events/listen js/document "keydown" handeKeypress)
@@ -65,7 +69,7 @@
 (-> (mem/clean-memory)
     (mem/load-fonts "roms/font.csv")
     (.then #(do (js/console.log "Fonts loaded") %))  ; Debug print
-    (.then #(mem/load-rom % "roms/ibm.ch8"))
+    (.then #(mem/load-rom % "roms/3-corax+.ch8"))
     (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
     (.then #(swap! emulator-state assoc :memory %))
     (.then #(js/console.log "Done!"))

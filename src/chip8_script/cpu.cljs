@@ -42,9 +42,20 @@
     0xB :JP-V0-addr
     0xC :RND-Vx-byte
     0xD :DRW-Vx-Vy-nibble
-    ; E F TODO
-    0xE nil
-    0xF nil))
+    0xE (case (bit-and 0xFF opcode)
+          0x9E :SKP-Vx
+          0xA1 :SKNP-Vx)
+    0xF (case (bit-and 0xFF opcode)
+          0x07 :LD-Vx-DT
+          0x0A :LD-Vx-K
+          0x15 :LD-DT-Vx
+          0x18 :LD-ST-Vx
+          0x1E :ADD-I-Vx
+          0x29 :LD-F-Vx
+          0x33 :LD-B-Vx
+          0x55 :LD-I-Vx
+          0x65 :LD-Vx-I)))
+
 
 (defn byte->pixels
   [byte]
@@ -155,22 +166,25 @@
                 (let [vx (get-in state [:registers (read-nibble opcode 2)])
                       msb (bit-shift-right (bit-and vx 0x80) 7)] ; Get the most significant bit
                   (-> state
-                      (assoc-in [:registers (read-nibble opcode 2)] (bit-shift-left vx 1))
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-and (bit-shift-left vx 1) 0xFF))
                       (assoc-in [:registers 0xF] msb))))
-   
+
    :SNE-Vx-Vy (fn [state opcode] ; Skip if Vx != Vy
-                (if-not (= (get-in state [:registers (read-nibble opcode 2)]) 
+                (if-not (= (get-in state [:registers (read-nibble opcode 2)])
                            (get-in state [:registers (read-nibble opcode 3)]))
                   (update state :pc #(+ 2 %))
-                  state)) 
+                  state))
 
 
    :LD-I-addr (fn [state opcode] ; Set I to address
                 (assoc state :i (bit-and 0x0FFF opcode)))
-   
+
    :JP-V0-addr (fn [state opcode] ; Jump to address + V0
                  (assoc state :pc (+ (bit-and 0x0FFF opcode) (get-in state [:registers 0]))))
-   
+
+   :RND-Vx-byte (fn [state opcode] ; Random number AND byte, stores in Vx
+                  (assoc-in state [:registers (read-nibble opcode 2)]
+                            (bit-and (rand-int 256) (bit-and 0x00FF opcode))))
 
    :DRW-Vx-Vy-nibble (fn [state opcode] ; 
                        (let [[vx vy] (map #(get-in state [:registers (read-nibble opcode %)]) '(2 3))
@@ -178,8 +192,72 @@
                          (let [old-display (:display state) sprite (bytes->sprite bytes vx vy)]
                            (-> state
                                (assoc :display (vec (map xor old-display sprite)))
-                               (assoc-in [:registers 0xF] (if (some true? (map #(= %1 %2) old-display sprite)) 1 0))))))})
+                               (assoc-in [:registers 0xF] (if (some true? (map #(= %1 %2) old-display sprite)) 1 0))))))
+   :SKP-Vx (fn [state opcode] ; Skip next instruction if key Vx is pressed
+             (if (contains? (:keys state)  (get-in state [:registers (read-nibble opcode 2)]))
+               (update state :pc #(+ 2 %))
+               state))
+   :SKNP-Vx (fn [state opcode] ; Skip next instruction if key Vx is not pressed
+              (if-not (contains? (:keys state) (get-in state [:registers (read-nibble opcode 2)]))
+                (update state :pc #(+ 2 %))
+                state))
+   :LD-Vx-DT (fn [state opcode] ; Load delay timer to Vx
+               (assoc-in state [:registers (read-nibble opcode 2)] (bit-and (:delay (:timers state)) 0xFF)))
+   :LD-Vx-K (fn [state opcode] ; Wait for key press, store in Vx
+              (if (empty? (:keys state))
+                (update state :pc #(- 2 %)) ; This handles "waiting", maybe does not work
+                (assoc-in state [:registers (read-nibble opcode 2)]
+                          (first (:keys state)))))
+   :LD-DT-Vx (fn [state opcode] ; Load Vx to delay timer
+               (assoc-in state [:timers :delay]
+                         (get-in state [:registers (read-nibble opcode 2)])))
+   :LD-ST-Vx (fn [state opcode] ; Load Vx to sound timer
+               (assoc-in state [:timers :sound]
+                         (get-in state [:registers (read-nibble opcode 2)])))
+   :ADD-I-Vx (fn [state opcode] ; Add Vx to I
+               (assoc state :i
+                      (bit-and (+ (:i state) (get-in state [:registers (read-nibble opcode 2)])) 0xFFF)))
+   :LD-F-Vx (fn [state opcode] ; Load font address for Vx
+              (assoc state :i
+                     (+ 0x050 (* 5 (get-in state [:registers (read-nibble opcode 2)])))))
+   :LD-B-Vx (fn [state opcode] ; Store BCD representation of Vx at I, I+1, I+2
+              (let [vx (get-in state [:registers (read-nibble opcode 2)])
+                    hundreds (mod (quot vx 100) 10)
+                    tens (mod (quot vx 10) 10)
+                    units (mod vx 10)]
+                (update state :memory #(mem/write-from % (:i state)
+                                                       [hundreds tens units]))))
+   :LD-I-Vx (fn [state opcode] ; Load Vx registers to memory starting at I
+              (reduce (fn [s k]
+                        (assoc-in s [:memory (+ (:i state) k)]
+                               (get-in state [:registers k])))
+                      state
+                      (range (inc (read-nibble opcode 2))))) 
+    :LD-Vx-I (fn [state opcode] ; Load memory starting at I to Vx registers
+               (reduce (fn [s k]
+                         (assoc-in s [:registers k] (get-in state [:memory (+ (:i state) k)])))
+                       state
+                       (vec (range (inc (read-nibble opcode 2))))))
+   
+   })
 
+   (comment (fn [state opcode] ; Load memory starting at I to Vx registers
+              (reduce (fn [s k]
+                        (println "memory at I" (get-in state [:memory (:i state)]) "v0" (get-in state [:registers 0]))
+                        (let [byte (get-in state [:memory (+ (:i state) k)])]
+                          (println "byte is" byte)
+                          (println "k is" k)
+                          (println "v0 is" (get-in s [:registers 0]))
+                          (assoc-in s [:registers k] byte)))
+                      state
+                      (vec (range (read-nibble opcode 2))))))
+
+(defn decrease-timers
+  [state]
+  (let [timers (:timers state)]
+    (-> state
+        (assoc-in [:timers :delay] (max 0 (dec (:delay timers))))
+        (assoc-in [:timers :sound] (max 0 (dec (:sound timers)))))))
 
 (defn fetch-decode-execute
   [state]
@@ -188,7 +266,9 @@
   ;(println "DEBUG: (:pc state) is:" (:pc state))
   (let [opcode (mem/read-instruction (:memory state) (:pc state))]
     ;(println "The opcode is " opcode)
-    (let [updated-state (assoc state :pc (+ 2 (:pc state)))]
+    (let [updated-state (-> state
+                            (decrease-timers) ; This implementation is wrong, should be at 60Hz always.
+                            (update :pc #(+ 2 %)))]
       (if-let [com (decode opcode)]
         (if-let [fun (get commands com)]
           (fun updated-state opcode)
