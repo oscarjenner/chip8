@@ -21,12 +21,13 @@
 
 (defn handeKeypress [event]
   (let [key (.-key event)]
-    (swap! pressedKeys conj key)
-    (println "Pressed keys:" @pressedKeys)))
+    (swap! emulator-state #(assoc %1 :keys (conj (:keys %1) %2)) key)
+    (println "Pressed keys:" (@emulator-state :keys))
+    ))
 
 (defn handleKeyRelease [event]
   (let [key (.-key event)]
-    (swap! pressedKeys disj key)))
+    (swap! emulator-state #(assoc %1 :keys (disj (:keys %1) %2)) key)))
 
 (events/listen js/document "keydown" handeKeypress)
 (events/listen js/document "keyup" handleKeyRelease)
@@ -68,7 +69,7 @@
     (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
     (.then #(swap! emulator-state assoc :memory %))
     (.then #(js/console.log "Done!"))
-    (.then #(game-loop emulator-state))) ; Error handling
+    (.then #(game-loop emulator-state)))
 
 
 ;; specify reload hook with ^:after-load metadata
