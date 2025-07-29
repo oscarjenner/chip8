@@ -1,6 +1,7 @@
 (ns ^:figwheel-hooks chip8-script.core
   (:require
    [goog.dom :as gdom]
+   [goog.events :as events]
    [chip8-script.memory :as mem]
    [chip8-script.cpu :as cpu]))
 
@@ -16,8 +17,19 @@
          :timers {:delay 0 :sound 0}
          :keys #{}}))
 
-;; Load memory and fonts
+(def pressedKeys (atom #{}))
 
+(defn handeKeypress [event]
+  (let [key (.-key event)]
+    (swap! pressedKeys conj key)
+    (println "Pressed keys:" @pressedKeys)))
+
+(defn handleKeyRelease [event]
+  (let [key (.-key event)]
+    (swap! pressedKeys disj key)))
+
+(events/listen js/document "keydown" handeKeypress)
+(events/listen js/document "keyup" handleKeyRelease)
 
 (defn getCanvas []
   (gdom/getElement "my-canvas"))
