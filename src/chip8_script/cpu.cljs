@@ -111,8 +111,67 @@
                                 (bit-and 0x00FF)
                                 (+ (get-in state [:registers (read-nibble opcode 2)]))
                                 (bit-and 0x00FF))))
+   :LD-Vx-Vy (fn [state opcode] ; Load register Vy to Vx
+               (assoc-in state [:registers (read-nibble opcode 2)]
+                         (get-in state [:registers (read-nibble opcode 3)])))
+   :OR-Vx-Vy (fn [state opcode]; Bitwise or between Vx and Vy, stores in Vx
+               (assoc-in state [:registers (read-nibble opcode 2)]
+                         (bit-or (get-in state [:registers (read-nibble opcode 2)])
+                                 (get-in state [:registers (read-nibble opcode 3)]))))
+   :AND-Vx-Vy (fn [state opcode] ; Bitwise and between Vx and Vy, stores in Vx
+                (assoc-in state [:registers (read-nibble opcode 2)]
+                          (bit-and (get-in state [:registers (read-nibble opcode 2)])
+                                   (get-in state [:registers (read-nibble opcode 3)]))))
+   :XOR-Vx-Vy (fn [state opcode] ; Bitwise xor between Vx and Vy, stores in Vx
+                (assoc-in state [:registers (read-nibble opcode 2)]
+                          (bit-xor (get-in state [:registers (read-nibble opcode 2)])
+                                   (get-in state [:registers (read-nibble opcode 3)]))))
+   :ADD-Vx-Vy (fn [state opcode] ; Add Vy to Vx, stores in Vx
+                (let [sum (+ (get-in state [:registers (read-nibble opcode 2)])
+                             (get-in state [:registers (read-nibble opcode 3)]))
+                      carry (if (> sum 255) 1 0)]
+                  (-> state
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-and sum 0xFF))
+                      (assoc-in [:registers 0xF] carry))))
+   :SUB-Vx-Vy (fn [state opcode] ; Subtract Vy from Vx, stores in Vx
+                (let [diff (- (get-in state [:registers (read-nibble opcode 2)])
+                              (get-in state [:registers (read-nibble opcode 3)]))]
+                  (-> state
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-and diff 0xFF))
+                      (assoc-in [:registers 0xF] (if (neg? diff) 0 1))))) ; Set VF to 1 if no borrow, else 0
+   :SHR-Vx-Vy (fn [state opcode] ; Shift Vx right by 1, stores in Vx, sets VF to LSB of Vx before shift
+                (let [vx (get-in state [:registers (read-nibble opcode 2)])
+                      lsb (bit-and vx 0x01)]
+                  (-> state
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-shift-right vx 1))
+                      (assoc-in [:registers 0xF] lsb))))
+   :SUBN-Vx-Vy (fn [state opcode] ; Subtract Vx from Vy, stores in Vx
+                 (let [diff (- (get-in state [:registers (read-nibble opcode 3)])
+                               (get-in state [:registers (read-nibble opcode 2)]))]
+                   (-> state
+                       (assoc-in [:registers (read-nibble opcode 2)] (bit-and diff 0xFF))
+                       (assoc-in [:registers 0xF] (if (neg? diff) 0 1))))) ; Set VF to 1 if no borrow, else 0
+   :SHL-Vx-Vy (fn [state opcode] ; Shift Vx left by 1, stores in Vx, sets VF to MSB of Vx before shift
+                (let [vx (get-in state [:registers (read-nibble opcode 2)])
+                      msb (bit-shift-right (bit-and vx 0x80) 7)] ; Get the most significant bit
+                  (-> state
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-shift-left vx 1))
+                      (assoc-in [:registers 0xF] msb))))
+   
+   :SNE-Vx-Vy (fn [state opcode] ; Skip if Vx != Vy
+                (if-not (= (get-in state [:registers (read-nibble opcode 2)]) 
+                           (get-in state [:registers (read-nibble opcode 3)]))
+                  (update state :pc #(+ 2 %))
+                  state)) 
+
+
    :LD-I-addr (fn [state opcode] ; Set I to address
                 (assoc state :i (bit-and 0x0FFF opcode)))
+   
+   :JP-V0-addr (fn [state opcode] ; Jump to address + V0
+                 (assoc state :pc (+ (bit-and 0x0FFF opcode) (get-in state [:registers 0]))))
+   
+
    :DRW-Vx-Vy-nibble (fn [state opcode] ; 
                        (let [[vx vy] (map #(get-in state [:registers (read-nibble opcode %)]) '(2 3))
                              bytes (mem/read-n-bytes (:memory state) (:i state) (read-nibble opcode 4))]
