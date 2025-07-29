@@ -27,7 +27,9 @@
 
 (defn write-at
   [memory position value]
-  (assoc memory position value))
+  (if (< position (count memory))
+   (assoc memory position value)
+    memory))
 
 (defn write-from
   "Writes a sequence to memory beginning at a certain point"

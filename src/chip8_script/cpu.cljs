@@ -59,7 +59,7 @@
 
 (defn byte->pixels
   [byte]
-  (let [byte-string (.toString byte 2)]
+  (let [byte-string (.toString byte 2)] 
     (map #(= "1" (str %))
          (str
           (apply str (take (- 8 (count byte-string)) (repeat "0"))) ; This is just padding
@@ -67,12 +67,13 @@
 
 (defn bytes->sprite
   ([bytes x y]
-   (bytes->sprite bytes x y (vec (take (* 32 64) (repeat false)))))
+   (bytes->sprite bytes (mod x 64) (mod y 32) (vec (take (* 32 64) (repeat false)))))
   ([bytes x y sprite]
-   (if-let [[first & rest] bytes]
-     (recur rest x (inc y)
+   (let [[first & rest] bytes]
+     (if first
+       (recur rest x (inc y)
             (mem/write-from sprite (+ x (* 64 y)) (byte->pixels first)))
-     sprite)))
+     sprite))))
 
 (defn xor
   [a b]
@@ -261,13 +262,9 @@
 
 (defn fetch-decode-execute
   [state]
-  ;(println "DEBUG: state parameter is:" state)
-  ;(println "DEBUG: type of state:" (type state))
-  ;(println "DEBUG: (:pc state) is:" (:pc state))
   (let [opcode (mem/read-instruction (:memory state) (:pc state))]
     ;(println "The opcode is " opcode)
     (let [updated-state (-> state
-                            (decrease-timers) ; This implementation is wrong, should be at 60Hz always.
                             (update :pc #(+ 2 %)))]
       (if-let [com (decode opcode)]
         (if-let [fun (get commands com)]

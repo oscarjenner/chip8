@@ -54,7 +54,28 @@
   (let [ctx (getContext (getCanvas))]
     (.putImageData ctx (createImage ctx pixels) 0 0)))
 
+(def audio-context (js/AudioContext.))
+(def oscillator (.createOscillator audio-context))
+(def gain-node (.createGain audio-context))
+(def sound-playing (atom false))
 
+(.connect oscillator gain-node)
+(.connect gain-node (.-destination audio-context))
+(set! (.-frequency.value oscillator) 440)
+(set! (.-value (.-gain gain-node)) 0) 
+(.start oscillator) 
+
+(defn play-sound []
+  (when-not @sound-playing
+    (println "Playing sound")
+    (set! (.-value (.-gain gain-node)) 0.3) 
+    (reset! sound-playing true)))
+
+(defn stop-sound []
+  (when @sound-playing
+    (println "Stopping sound")
+    (set! (.-value (.-gain gain-node)) 0)
+    (reset! sound-playing false)))
 
 
 (defonce game-running (atom true))
@@ -65,15 +86,36 @@
     (let [disp (:display @state)]
       (paintCanvas disp))
     (js/requestAnimationFrame #(game-loop state))))
+
+(defn render-loop [state]
+  (swap! state cpu/decrease-timers)
+  (println "Timers:" (:timers @state)) ; Why does this give 0 every other time?
+  (if (pos? (:sound (:timers @state)))
+    (play-sound)
+    (stop-sound))
+  (let [disp (:display @state)]
+    (paintCanvas disp))
+  (js/requestAnimationFrame #(render-loop state)))
+
+(defn game [state]
+  (js/setInterval (fn []
+                    (when @game-running
+                      (swap! state cpu/fetch-decode-execute)))
+                  1)
+  (render-loop state))
+
+
 (println "Loading memory and fonts...")
 (-> (mem/clean-memory)
     (mem/load-fonts "roms/font.csv")
     (.then #(do (js/console.log "Fonts loaded") %))  ; Debug print
-    (.then #(mem/load-rom % "roms/3-corax+.ch8"))
+    (.then #(mem/load-rom % "roms/7-beep.ch8"))
     (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
     (.then #(swap! emulator-state assoc :memory %))
-    (.then #(js/console.log "Done!"))
-    (.then #(game-loop emulator-state)))
+    (.then #(do 
+              (js/console.log "Done!") 
+              (game emulator-state)))
+    )
 
 
 ;; specify reload hook with ^:after-load metadata
