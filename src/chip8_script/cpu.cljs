@@ -271,3 +271,7 @@
           (fun updated-state opcode)
           updated-state)
         updated-state))))
+(defn nx-fetch-decode-execute
+  ; Meant to be run at 60Hz, performs n cycles.
+  [state n]
+  (decrease-timers (reduce (fn [s fde] (fde s)) state (take n (repeat fetch-decode-execute)))))

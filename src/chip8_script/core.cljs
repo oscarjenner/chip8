@@ -57,6 +57,7 @@
 (def audio-context (js/AudioContext.))
 (def oscillator (.createOscillator audio-context))
 (def gain-node (.createGain audio-context))
+(def previous-stop (atom false))
 (def sound-playing (atom false))
 
 (.connect oscillator gain-node)
@@ -65,31 +66,37 @@
 (set! (.-value (.-gain gain-node)) 0) 
 (.start oscillator) 
 
-(defn play-sound []
-  (when-not @sound-playing
+(defn play-sound [] 
     (println "Playing sound")
     (set! (.-value (.-gain gain-node)) 0.3) 
-    (reset! sound-playing true)))
+    (reset! sound-playing true)
+    (reset! previous-stop false))
 
 (defn stop-sound []
   (when @sound-playing
-    (println "Stopping sound")
-    (set! (.-value (.-gain gain-node)) 0)
-    (reset! sound-playing false)))
+    (if (true? @previous-stop)
+      (do
+        (println "Stopping sound")
+        (set! (.-value (.-gain gain-node)) 0)
+        (reset! sound-playing false))
+      (reset! previous-stop true))))
 
 
-(defonce game-running (atom true))
 
 (defn game-loop [state]
-  (when @game-running
-    (swap! state cpu/fetch-decode-execute)
-    (let [disp (:display @state)]
-      (paintCanvas disp))
-    (js/requestAnimationFrame #(game-loop state))))
+  (swap! state #(cpu/nx-fetch-decode-execute % 15))
+  (let [current-state @state]
+      ;(println "Timers:" (:timers current-state))
+    (paintCanvas (:display current-state))
+      ;(println (pos? (:sound (:timers current-state))))
+    (if (pos? (:sound (:timers current-state)))
+      (play-sound)
+      (stop-sound)))
+  (js/requestAnimationFrame #(game-loop state)))
 
 (defn render-loop [state]
   (swap! state cpu/decrease-timers)
-  (println "Timers:" (:timers @state)) ; Why does this give 0 every other time?
+  (println "Timers:" (:timers @state))
   (if (pos? (:sound (:timers @state)))
     (play-sound)
     (stop-sound))
@@ -99,9 +106,9 @@
 
 (defn game [state]
   (js/setInterval (fn []
-                    (when @game-running
-                      (swap! state cpu/fetch-decode-execute)))
-                  1)
+                    
+                      (swap! state #(cpu/nx-fetch-decode-execute % 15)))
+                  16)
   (render-loop state))
 
 
@@ -114,7 +121,7 @@
     (.then #(swap! emulator-state assoc :memory %))
     (.then #(do 
               (js/console.log "Done!") 
-              (game emulator-state)))
+              (game-loop emulator-state)))
     )
 
 
