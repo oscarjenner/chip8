@@ -26,8 +26,7 @@
 (defn handeKeypress [event]
   (when-let [key (key-values (.-key event))]
     (swap! emulator-state #(assoc %1 :keys (conj (:keys %1) %2)) key)
-    (println "Pressed keys:" (@emulator-state :keys))
-    ))
+    (println "Pressed keys:" (@emulator-state :keys))))
 
 (defn handleKeyRelease [event]
   (when-let [key (key-values (.-key event))]
@@ -63,23 +62,55 @@
 (.connect oscillator gain-node)
 (.connect gain-node (.-destination audio-context))
 (set! (.-frequency.value oscillator) 440)
-(set! (.-value (.-gain gain-node)) 0) 
-(.start oscillator) 
+(set! (.-value (.-gain gain-node)) 0)
 
-(defn play-sound [] 
-    (println "Playing sound")
-    (set! (.-value (.-gain gain-node)) 0.3) 
-    (reset! sound-playing true)
-    (reset! previous-stop false))
+
+(def audio-ready? (atom false))
+
+(defn init-audio-on-click []
+  (when (= (.-state audio-context) "suspended")
+    (.then (.resume audio-context)
+           #(do
+              (reset! audio-ready? true)
+              (js/console.log "Audio context resumed!"))))
+
+  (when (not @audio-ready?)
+    (.start oscillator)
+    (reset! audio-ready? true)))
+
+(.addEventListener js/document "click" init-audio-on-click {:once true})
+
+
+(defn play-sound []
+  (when (and @audio-ready? (not @sound-playing))
+    (do
+      (println "Playing sound")
+      (let [now (.-currentTime audio-context)]
+        (.setValueAtTime (.-gain gain-node) 0.001 now)
+        (.exponentialRampToValueAtTime (.-gain gain-node) 0.3 (+ now 0.02)))
+      (reset! sound-playing true)
+      (reset! previous-stop false))))
 
 (defn stop-sound []
-  (when @sound-playing
+  (when (and @sound-playing @audio-ready?)
     (if (true? @previous-stop)
       (do
         (println "Stopping sound")
-        (set! (.-value (.-gain gain-node)) 0)
+        (let [now (.-currentTime audio-context)]
+          (.setValueAtTime (.-gain gain-node) 0.3 now)
+          (.exponentialRampToValueAtTime (.-gain gain-node) 0.001 (+ now 0.02)))
         (reset! sound-playing false))
       (reset! previous-stop true))))
+
+(def stop-counter (atom 0))
+
+(defn stop-signal []
+  (swap! stop-counter #(max 0 (dec %)))
+  (when (zero? @stop-counter)
+    (stop-sound)))
+(defn start-signal []
+  (reset! stop-counter 5)
+  (play-sound))
 
 
 
@@ -90,8 +121,8 @@
     (paintCanvas (:display current-state))
       ;(println (pos? (:sound (:timers current-state))))
     (if (pos? (:sound (:timers current-state)))
-      (play-sound)
-      (stop-sound)))
+      (start-signal)
+      (stop-signal)))
   (js/requestAnimationFrame #(game-loop state)))
 
 (defn render-loop [state]
@@ -106,8 +137,8 @@
 
 (defn game [state]
   (js/setInterval (fn []
-                    
-                      (swap! state #(cpu/nx-fetch-decode-execute % 15)))
+
+                    (swap! state #(cpu/nx-fetch-decode-execute % 15)))
                   16)
   (render-loop state))
 
@@ -119,10 +150,9 @@
     (.then #(mem/load-rom % "roms/7-beep.ch8"))
     (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
     (.then #(swap! emulator-state assoc :memory %))
-    (.then #(do 
-              (js/console.log "Done!") 
-              (game-loop emulator-state)))
-    )
+    (.then #(do
+              (js/console.log "Done!")
+              (game-loop emulator-state))))
 
 
 ;; specify reload hook with ^:after-load metadata
