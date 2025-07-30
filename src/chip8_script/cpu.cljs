@@ -36,7 +36,8 @@
         5 :SUB-Vx-Vy
         6 :SHR-Vx-Vy
         7 :SUBN-Vx-Vy
-        0xE :SHL-Vx-Vy)
+        0xE :SHL-Vx-Vy
+        nil)
     9 (when (= 0 (read-nibble opcode 4)) :SNE-Vx-Vy)
     0xA :LD-I-addr
     0xB :JP-V0-addr
@@ -44,7 +45,8 @@
     0xD :DRW-Vx-Vy-nibble
     0xE (case (bit-and 0xFF opcode)
           0x9E :SKP-Vx
-          0xA1 :SKNP-Vx)
+          0xA1 :SKNP-Vx
+          nil)
     0xF (case (bit-and 0xFF opcode)
           0x07 :LD-Vx-DT
           0x0A :LD-Vx-K
@@ -54,7 +56,8 @@
           0x29 :LD-F-Vx
           0x33 :LD-B-Vx
           0x55 :LD-I-Vx
-          0x65 :LD-Vx-I)))
+          0x65 :LD-Vx-I
+          nil)))
 
 
 (defn byte->pixels
@@ -67,13 +70,13 @@
 
 (defn bytes->sprite
   ([bytes x y]
-   (bytes->sprite bytes (mod x 64) (mod y 32) (vec (take (* 32 64) (repeat false)))))
+   (bytes->sprite (take (min 16 (- 32 (mod y 32))) bytes) (mod x 64) (mod y 32) (vec (take (* 32 64) (repeat false)))))
   ([bytes x y sprite]
    (let [[first & rest] bytes]
      (if first
        (recur rest x (inc y)
-            (mem/write-from sprite (+ x (* 64 y)) (byte->pixels first)))
-     sprite))))
+              (mem/write-from sprite (+ x (* 64 y)) (take (min 8 (- 64 x)) (byte->pixels first))))
+       sprite))))
 
 (defn xor
   [a b]
@@ -127,17 +130,23 @@
                (assoc-in state [:registers (read-nibble opcode 2)]
                          (get-in state [:registers (read-nibble opcode 3)])))
    :OR-Vx-Vy (fn [state opcode]; Bitwise or between Vx and Vy, stores in Vx
-               (assoc-in state [:registers (read-nibble opcode 2)]
+               (-> state
+                   (assoc-in [:registers (read-nibble opcode 2)]
                          (bit-or (get-in state [:registers (read-nibble opcode 2)])
-                                 (get-in state [:registers (read-nibble opcode 3)]))))
+                                 (get-in state [:registers (read-nibble opcode 3)])))
+                   (assoc-in [:registers 0xF] 0))) ; Set VF to 0
    :AND-Vx-Vy (fn [state opcode] ; Bitwise and between Vx and Vy, stores in Vx
-                (assoc-in state [:registers (read-nibble opcode 2)]
-                          (bit-and (get-in state [:registers (read-nibble opcode 2)])
-                                   (get-in state [:registers (read-nibble opcode 3)]))))
+                (-> state
+                    (assoc-in [:registers (read-nibble opcode 2)]
+                               (bit-and (get-in state [:registers (read-nibble opcode 2)])
+                                        (get-in state [:registers (read-nibble opcode 3)])))
+                    (assoc-in [:registers 0xF] 0))) ; Set VF to 0
    :XOR-Vx-Vy (fn [state opcode] ; Bitwise xor between Vx and Vy, stores in Vx
-                (assoc-in state [:registers (read-nibble opcode 2)]
+                (-> state
+                    (assoc-in [:registers (read-nibble opcode 2)]
                           (bit-xor (get-in state [:registers (read-nibble opcode 2)])
-                                   (get-in state [:registers (read-nibble opcode 3)]))))
+                                   (get-in state [:registers (read-nibble opcode 3)])))
+                    (assoc-in [:registers 0xF] 0))) ; Set VF to 0
    :ADD-Vx-Vy (fn [state opcode] ; Add Vy to Vx, stores in Vx
                 (let [sum (+ (get-in state [:registers (read-nibble opcode 2)])
                              (get-in state [:registers (read-nibble opcode 3)]))
@@ -151,11 +160,11 @@
                   (-> state
                       (assoc-in [:registers (read-nibble opcode 2)] (bit-and diff 0xFF))
                       (assoc-in [:registers 0xF] (if (neg? diff) 0 1))))) ; Set VF to 1 if no borrow, else 0
-   :SHR-Vx-Vy (fn [state opcode] ; Shift Vx right by 1, stores in Vx, sets VF to LSB of Vx before shift
-                (let [vx (get-in state [:registers (read-nibble opcode 2)])
-                      lsb (bit-and vx 0x01)]
+   :SHR-Vx-Vy (fn [state opcode] ; Shift Vy right by 1, stores in Vx, sets VF to LSB of Vx before shift
+                (let [vy (get-in state [:registers (read-nibble opcode 3)])
+                      lsb (bit-and vy 0x01)]
                   (-> state
-                      (assoc-in [:registers (read-nibble opcode 2)] (bit-shift-right vx 1))
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-shift-right vy 1))
                       (assoc-in [:registers 0xF] lsb))))
    :SUBN-Vx-Vy (fn [state opcode] ; Subtract Vx from Vy, stores in Vx
                  (let [diff (- (get-in state [:registers (read-nibble opcode 3)])
@@ -163,11 +172,11 @@
                    (-> state
                        (assoc-in [:registers (read-nibble opcode 2)] (bit-and diff 0xFF))
                        (assoc-in [:registers 0xF] (if (neg? diff) 0 1))))) ; Set VF to 1 if no borrow, else 0
-   :SHL-Vx-Vy (fn [state opcode] ; Shift Vx left by 1, stores in Vx, sets VF to MSB of Vx before shift
-                (let [vx (get-in state [:registers (read-nibble opcode 2)])
-                      msb (bit-shift-right (bit-and vx 0x80) 7)] ; Get the most significant bit
+   :SHL-Vx-Vy (fn [state opcode] ; Shift Vy left by 1, stores in Vx, sets VF to MSB of Vx before shift
+                (let [vy (get-in state [:registers (read-nibble opcode 3)])
+                      msb (bit-shift-right (bit-and vy 0x80) 7)] ; Get the most significant bit
                   (-> state
-                      (assoc-in [:registers (read-nibble opcode 2)] (bit-and (bit-shift-left vx 1) 0xFF))
+                      (assoc-in [:registers (read-nibble opcode 2)] (bit-and (bit-shift-left vy 1) 0xFF))
                       (assoc-in [:registers 0xF] msb))))
 
    :SNE-Vx-Vy (fn [state opcode] ; Skip if Vx != Vy
@@ -191,9 +200,11 @@
                        (let [[vx vy] (map #(get-in state [:registers (read-nibble opcode %)]) '(2 3))
                              bytes (mem/read-n-bytes (:memory state) (:i state) (read-nibble opcode 4))]
                          (let [old-display (:display state) sprite (bytes->sprite bytes vx vy)]
-                           (-> state
+                           (do
+                             (-> state
                                (assoc :display (vec (map xor old-display sprite)))
-                               (assoc-in [:registers 0xF] (if (some true? (map #(= %1 %2) old-display sprite)) 1 0))))))
+                               (assoc-in [:registers 0xF] (if (some true? (map #(and %1 %2) old-display sprite)) 1 0))
+                               (assoc :sprite-written true)))))) ; To stop process until next frame
    :SKP-Vx (fn [state opcode] ; Skip next instruction if key Vx is pressed
              (if (contains? (:keys state)  (get-in state [:registers (read-nibble opcode 2)]))
                (update state :pc #(+ 2 %))
@@ -206,9 +217,11 @@
                (assoc-in state [:registers (read-nibble opcode 2)] (bit-and (:delay (:timers state)) 0xFF)))
    :LD-Vx-K (fn [state opcode] ; Wait for key press, store in Vx
               (if (empty? (:keys state))
-                (update state :pc #(- 2 %)) ; This handles "waiting", maybe does not work
-                (assoc-in state [:registers (read-nibble opcode 2)]
-                          (first (:keys state)))))
+                (do ;(println "pausing")
+                    (update state :pc #(- % 2))) ; This handles "waiting", maybe does not work
+                (do ;(println "resuming")
+                  (assoc-in state [:registers (read-nibble opcode 2)]
+                          (first (:keys state))))))
    :LD-DT-Vx (fn [state opcode] ; Load Vx to delay timer
                (assoc-in state [:timers :delay]
                          (get-in state [:registers (read-nibble opcode 2)])))
@@ -229,16 +242,18 @@
                 (update state :memory #(mem/write-from % (:i state)
                                                        [hundreds tens units]))))
    :LD-I-Vx (fn [state opcode] ; Load Vx registers to memory starting at I
-              (reduce (fn [s k]
-                        (assoc-in s [:memory (+ (:i state) k)]
-                               (get-in state [:registers k])))
-                      state
-                      (range (inc (read-nibble opcode 2))))) 
+              (-> (reduce (fn [s k]
+                            (assoc-in s [:memory (+ (:i state) k)]
+                                      (get-in state [:registers k])))
+                          state
+                          (range (inc (read-nibble opcode 2))))
+                  (assoc :i (+ (:i state) (inc (read-nibble opcode 2)))))) ;increase I
     :LD-Vx-I (fn [state opcode] ; Load memory starting at I to Vx registers
-               (reduce (fn [s k]
-                         (assoc-in s [:registers k] (get-in state [:memory (+ (:i state) k)])))
-                       state
-                       (vec (range (inc (read-nibble opcode 2))))))
+               (-> (reduce (fn [s k]
+                             (assoc-in s [:registers k] (get-in state [:memory (+ (:i state) k)])))
+                           state
+                           (vec (range (inc (read-nibble opcode 2)))))
+                   (assoc :i (+ (:i state) (inc (read-nibble opcode 2)))))) ; increase I
    
    })
 
@@ -262,16 +277,25 @@
 
 (defn fetch-decode-execute
   [state]
-  (let [opcode (mem/read-instruction (:memory state) (:pc state))]
+  ;(println (:timers state))
+  ;(println (:registers state))
+  (if (not (true? (:sprite-written state)))
+   (let [opcode (mem/read-instruction (:memory state) (:pc state))]
     ;(println "The opcode is " opcode)
     (let [updated-state (-> state
                             (update :pc #(+ 2 %)))]
       (if-let [com (decode opcode)]
-        (if-let [fun (get commands com)]
+        (do 
+          ;(println "Executing command:" com)
+          (if-let [fun (get commands com)]
           (fun updated-state opcode)
-          updated-state)
-        updated-state))))
+          updated-state))
+        updated-state)))
+    state))
 (defn nx-fetch-decode-execute
   ; Meant to be run at 60Hz, performs n cycles.
-  [state n]
-  (decrease-timers (reduce (fn [s fde] (fde s)) state (take n (repeat fetch-decode-execute)))))
+  [state n] 
+  (-> state
+      (assoc :sprite-written false)
+      (#(nth (iterate fetch-decode-execute %) n))
+      (decrease-timers)))

@@ -87,7 +87,7 @@
       (println "Playing sound")
       (let [now (.-currentTime audio-context)]
         (.setValueAtTime (.-gain gain-node) 0.001 now)
-        (.exponentialRampToValueAtTime (.-gain gain-node) 0.3 (+ now 0.02)))
+        (.exponentialRampToValueAtTime (.-gain gain-node) 0.3 (+ now 0.1)))
       (reset! sound-playing true)
       (reset! previous-stop false))))
 
@@ -98,7 +98,7 @@
         (println "Stopping sound")
         (let [now (.-currentTime audio-context)]
           (.setValueAtTime (.-gain gain-node) 0.3 now)
-          (.exponentialRampToValueAtTime (.-gain gain-node) 0.001 (+ now 0.02)))
+          (.exponentialRampToValueAtTime (.-gain gain-node) 0.001 (+ now 0.1)))
         (reset! sound-playing false))
       (reset! previous-stop true))))
 
@@ -115,7 +115,7 @@
 
 
 (defn game-loop [state]
-  (swap! state #(cpu/nx-fetch-decode-execute % 15))
+  (swap! state #(cpu/nx-fetch-decode-execute % 14))
   (let [current-state @state]
       ;(println "Timers:" (:timers current-state))
     (paintCanvas (:display current-state))
@@ -125,29 +125,13 @@
       (stop-signal)))
   (js/requestAnimationFrame #(game-loop state)))
 
-(defn render-loop [state]
-  (swap! state cpu/decrease-timers)
-  (println "Timers:" (:timers @state))
-  (if (pos? (:sound (:timers @state)))
-    (play-sound)
-    (stop-sound))
-  (let [disp (:display @state)]
-    (paintCanvas disp))
-  (js/requestAnimationFrame #(render-loop state)))
-
-(defn game [state]
-  (js/setInterval (fn []
-
-                    (swap! state #(cpu/nx-fetch-decode-execute % 15)))
-                  16)
-  (render-loop state))
 
 
 (println "Loading memory and fonts...")
 (-> (mem/clean-memory)
     (mem/load-fonts "roms/font.csv")
     (.then #(do (js/console.log "Fonts loaded") %))  ; Debug print
-    (.then #(mem/load-rom % "roms/7-beep.ch8"))
+    (.then #(mem/load-rom % "roms/wdl.ch8"))
     (.then #(do (js/console.log "ROM loaded") %))    ; Debug print
     (.then #(swap! emulator-state assoc :memory %))
     (.then #(do
